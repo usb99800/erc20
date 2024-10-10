@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ETH to Token Swap (Uniswap V2)</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <style>
+        .input-group { margin-bottom: 10px; }
+        .input-group label { display: inline-block; width: 150px; }
+    </style>
+</head>
+<body>
+    <h1>ETH to Token Swap (Uniswap V2)</h1>
+    <button id="connectWallet">Connect Wallet</button>
+    <div id="walletInfo" style="display:none;">
+        <p>Connected Address: <span id="connectedAddress"></span></p>
+    </div>
+    <div id="swapForm" style="display:none;">
+        <div class="input-group">
+            <label for="amountIn">ETH Amount:</label>
+            <input type="range" id="amountIn" min="0.02" max="3" step="0.01" value="0.1">
+            <span id="amountInDisplay">0.10 ETH</span>
+        </div>
+        <div class="input-group">
+            <label for="tokenOut">Token Out Address:</label>
+            <input type="text" id="tokenOut" placeholder="Token Out Address">
+            <span id="tokenName"></span>
+        </div>
+        <div class="input-group">
+            <label for="recipientAddress">Recipient Address (B):</label>
+            <input type="text" id="recipientAddress" placeholder="Recipient Address (B)">
+        </div>
+        <div class="input-group">
+            <label for="slippage">Slippage Tolerance:</label>
+            <input type="number" id="slippage" min="0.1" max="100" step="0.1" value="0.1">%
+        </div>
+        <button id="swapButton">Swap</button>
+    </div>
+    <div id="result"></div>
+
+    <script>
+        let provider, signer, userAddress;
+        const routerAddress = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"; // Uniswap V2 Router02 address
+        const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"; // WETH address on mainnet
+
+        const routerABI = [
+            "function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts)",
+            "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)"
+        ];
+
+        const erc20ABI = [
+            "function name() view returns (string)",
+            "function symbol() view returns (string)"
+        ];
+
+        async function connectWallet() {
+            if (typeof window.ethereum !== 'undefined') {
+                try {
+                    await window.ethereum.request({ method: 'eth_requestAccounts' });
+                    provider = new ethers.providers.Web3Provider(window.ethereum);
+                    signer = provider.getSigner();
+                    userAddress = await signer.getAddress();
+                    document.getElementById('connectedAddress').textContent = userAddress;
+                    document.getElementById('walletInfo').style.display = 'block';
+                    document.getElementById('swapForm').style.display = 'block';
+                } catch (error) {
+                    console.error("Failed to connect wallet:", error);
+                }
+            } else {
+                alert("Please install MetaMask!");
+            }
+        }
+
+        async function getTokenName() {
+            const tokenAddress = document.getElementById('tokenOut').value;
+            if (ethers.utils.isAddress(tokenAddress)) {
+                const tokenContract = new ethers.Contract(tokenAddress, erc20ABI, provider);
+                try {
+                    const name = await tokenContract.name();
+                    const symbol = await tokenContract.symbol();
+                    document.getElementById('tokenName').textContent = `${name} (${symbol})`;
+                } catch (error) {
+                    document.getElementById('tokenName').textContent = "Invalid token";
+                }
+            } else {
+                document.getElementById('tokenName').textContent = "";
+            }
+        }
+
+        async function swap() {
+            const amountIn = ethers.utils.parseEther(document.getElementById('amountIn').value);
+            const tokenOut = document.getElementById('tokenOut').value;
+            const recipient = document.getElementById('recipientAddress').value;
+            const slippage = document.getElementById('slippage').value;
+
+            const router = new ethers.Contract(routerAddress, routerABI, signer);
+
+            try {
+                const path = [WETH, tokenOut];
+                const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 minutes from now
+
+                // Get expected amount out
+                const amounts = await router.getAmountsOut(amountIn, path);
+                const amountOutMin = amounts[1].mul(10000 - slippage * 100).div(10000);
+
+                const tx = await router.swapExactETHForTokens(
+                    amountOutMin,
+                    path,
+                    recipient,
+                    deadline,
+                    { value: amountIn }
+                );
+
+                document.getElementById('result').textContent = `Transaction sent! Hash: ${tx.hash}`;
+                await tx.wait();
+                document.getElementById('result').textContent += ' Transaction confirmed!';
+            } catch (error) {
+                console.error("Swap failed:", error);
+                document.getElementById('result').textContent = `Swap failed: ${error.message}`;
+            }
+        }
+
+        document.getElementById('connectWallet').addEventListener('click', connectWallet);
+        document.getElementById('swapButton').addEventListener('click', swap);
+        document.getElementById('tokenOut').addEventListener('blur', getTokenName);
+        
+        document.getElementById('amountIn').addEventListener('input', function() {
+            document.getElementById('amountInDisplay').textContent = `${parseFloat(this.value).toFixed(2)} ETH`;
+        });
+    </script>
+</body>
+</html>
