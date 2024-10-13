@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ERC-20 Address Parser</title>
+  <!-- Load Tailwind CSS from CDN -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+  <div class="container mx-auto">
+    <div class="mb-6">
+      <h2 class="text-2xl font-semibold">Input string to extract ERC-20 addresses</h2>
+      <textarea id="inputString" class="w-full p-3 mt-2 border border-gray-300 rounded-lg" rows="4" placeholder="Enter any string here..."></textarea>
+      <button class="bg-blue-500 text-white px-4 py-2 rounded-lg mt-3 hover:bg-blue-600" onclick="extractAddresses()">Extract ERC-20 Addresses</button>
+    </div>
+
+    <div id="addressesOutput"></div>
+
+    <div id="balanceOutput"></div>
+
+    <div class="mt-8">
+      <h2 class="text-2xl font-semibold">Input ERC-20 contract address</h2>
+      <input type="text" id="tokenAddress" class="w-full p-3 mt-2 border border-gray-300 rounded-lg" placeholder="ERC-20 Contract Address">
+      <button class="bg-green-500 text-white px-4 py-2 rounded-lg mt-3 hover:bg-green-600" onclick="fetchTokenBalances()">Fetch Token Holders</button>
+    </div>
+
+    <div id="tokenHolderOutput"></div>
+  </div>
+
+  <!-- Correct Ethers.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.6.9/dist/ethers.umd.min.js"></script>
+  <script>
+    let addresses = [];
+
+    function extractAddresses() {
+      const inputString = document.getElementById('inputString').value;
+      const regex = /\b0x[a-fA-F0-9]{40}\b/g;
+      const foundAddresses = inputString.match(regex);
+
+      if (foundAddresses) {
+        addresses = [...new Set(foundAddresses.map(addr => addr.toLowerCase()))];
+      }
+
+      displayAddresses();
+    }
+
+    function displayAddresses() {
+      const addressesHtml = addresses.map((addr, index) => `
+        <tr>
+          <td class="border px-4 py-2">${index + 1}</td>
+          <td class="border px-4 py-2">${addr}</td>
+        </tr>
+      `).join('');
+
+      document.getElementById('addressesOutput').innerHTML = `
+        <h3 class="text-xl font-semibold mt-6">Extracted Addresses</h3>
+        <table class="table-auto w-full mt-4">
+          <thead>
+            <tr>
+              <th class="border px-4 py-2">#</th>
+              <th class="border px-4 py-2">Address</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${addressesHtml}
+          </tbody>
+        </table>
+        <button class="bg-blue-500 text-white px-4 py-2 rounded-lg mt-4 hover:bg-blue-600" onclick="fetchEthBalances()">Fetch ETH/WETH Balances</button>
+      `;
+    }
+
+    // Use a dedicated RPC provider
+    const provider = new ethers.providers.JsonRpcProvider("https://ethereum-rpc.publicnode.com");
+
+    async function fetchEthBalances() {
+      let totalETH = ethers.BigNumber.from(0);
+      let totalWETH = ethers.BigNumber.from(0);
+
+      let balanceResults = await Promise.all(
+        addresses.map(async (address, index) => {
+          const ethBalance = await provider.getBalance(address);
+          totalETH = totalETH.add(ethBalance);
+
+          const wethContract = new ethers.Contract(
+            '0xC02aaa39b223FE8D0A0e5C4F27eAD9083C756Cc2', 
+            ['function balanceOf(address) view returns (uint256)'],
+            provider
+          );
+          const wethBalance = await wethContract.balanceOf(address);
+          totalWETH = totalWETH.add(wethBalance);
+
+          return {
+            index: index + 1,
+            address,
+            ethBalance: ethers.utils.formatEther(ethBalance),
+            wethBalance: ethers.utils.formatEther(wethBalance),
+          };
+        })
+      );
+
+      displayBalances(balanceResults, totalETH, totalWETH);
+    }
+
+    function displayBalances(balanceResults, totalETH, totalWETH) {
+      const balanceHtml = balanceResults.map(result => `
+        <tr>
+          <td class="border px-4 py-2">${result.index}</td>
+          <td class="border px-4 py-2">${result.address}</td>
+          <td class="border px-4 py-2">${result.ethBalance}</td>
+          <td class="border px-4 py-2">${result.wethBalance}</td>
+        </tr>
+      `).join('');
+
+      document.getElementById('balanceOutput').innerHTML = `
+        <h3 class="text-xl font-semibold mt-6">ETH/WETH Balances</h3>
+        <table class="table-auto w-full mt-4">
+          <thead>
+            <tr>
+              <th class="border px-4 py-2">#</th>
+              <th class="border px-4 py-2">Address</th>
+              <th class="border px-4 py-2">ETH Balance</th>
+              <th class="border px-4 py-2">WETH Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${balanceHtml}
+          </tbody>
+        </table>
+        <p class="mt-4"><strong>Total ETH:</strong> ${ethers.utils.formatEther(totalETH)} ETH</p>
+        <p><strong>Total WETH:</strong> ${ethers.utils.formatEther(totalWETH)} WETH</p>
+      `;
+    }
+
+    async function fetchTokenBalances() {
+      const tokenAddress = document.getElementById('tokenAddress').value;
+      const tokenContract = new ethers.Contract(
+        tokenAddress,
+        ['function balanceOf(address) view returns (uint256)', 'function totalSupply() view returns (uint256)'],
+        provider
+      );
+
+      let tokenBalances = await Promise.all(
+        addresses.map(async (address, index) => {
+          const balance = await tokenContract.balanceOf(address);
+          return {
+            index: index + 1,
+            address,
+            balance: ethers.utils.formatEther(balance)
+          };
+        })
+      );
+
+      tokenBalances = tokenBalances.filter(result => parseFloat(result.balance) > 0);
+      displayTokenBalances(tokenBalances);
+    }
+
+    function displayTokenBalances(tokenBalances) {
+      const tokenHtml = tokenBalances.map(result => `
+        <tr>
+          <td class="border px-4 py-2">${result.index}</td>
+          <td class="border px-4 py-2">${result.address}</td>
+          <td class="border px-4 py-2">${result.balance}</td>
+        </tr>
+      `).join('');
+
+      document.getElementById('tokenHolderOutput').innerHTML = `
+        <h3 class="text-xl font-semibold mt-6">Token Holders</h3>
+        <table class="table-auto w-full mt-4">
+          <thead>
+            <tr>
+              <th class="border px-4 py-2">#</th>
+              <th class="border px-4 py-2">Address</th>
+              <th class="border px-4 py-2">Token Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tokenHtml}
+          </tbody>
+        </table>
+      `;
+    }
+  </script>
+
+</body>
+</html>
